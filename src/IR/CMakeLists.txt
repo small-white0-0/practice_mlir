@@ -1,6 +1,7 @@
 add_mlir_dialect_library(MLIRMyDialect
         MyDialect.cpp
         MyTypes.cpp
+        MyOps.cpp
 
         DEPENDS
         MyDialectIncGen
