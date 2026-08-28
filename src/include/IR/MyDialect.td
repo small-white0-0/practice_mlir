@@ -147,13 +147,13 @@ def My_ConstantOp : My_Op<"constant", []> {
 }
 
 
-def My_SoftmaxOp : My_BinaryOp<"softmax",AnyMyTensor, AnyMyTensor, [], (ins I64Attr:$axis)>{
+def My_SoftmaxOp : My_UnaryOp<"softmax",AnyMyTensor, AnyMyTensor, [], (ins I64Attr:$axis)>{
     let hasVerifier = 1;
     let builders = [
         OpBuilder<(ins "::mlir::Value":$input, "int64_t":$axis) ,
             [{
                 $_state.addOperands(input);
-                $_state.getOrAddProperties<Properties>().axis = $_builder.getIntegerAttr($_builder.getIntegerType(64,true), axis);
+                $_state.getOrAddProperties<Properties>().axis = $_builder.getIntegerAttr($_builder.getIntegerType(64), axis);
                 $_state.addTypes(input.getType());
             }]>
 
