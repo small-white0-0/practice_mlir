@@ -4,6 +4,7 @@
 include "mlir/IR/DialectBase.td"
 include "mlir/IR/OpBase.td"
 include "mlir/IR/AttrTypeBase.td"
+include "mlir/IR/Interfaces.td"
 
 def My_Dialect : Dialect {
   let name = "my";
@@ -11,11 +12,16 @@ def My_Dialect : Dialect {
   let extraClassDeclaration = [{
     void registerTypes();
     void registerOps();
+    void registerAttrs();
   }];
   // 启用默认生成的 TypePrinterParser，不然会无法打印Types
   let useDefaultTypePrinterParser = true;
+  // 启用默认生成的 AttrPrinterParser，不然会无法打印Attr
+  let useDefaultAttributePrinterParser = true;
 }
 
+// ===============================================
+// Type
 class My_Type<string name, string typeMnemonic, list<Trait> traits = [],
                    string baseCppClass = "::mlir::Type">
     : TypeDef<My_Dialect, name, traits, baseCppClass> {
@@ -58,7 +64,64 @@ def My_BufferType : My_Type<"Buffer","buffer",[]>{
 
 }
 def AnyBuffer : Type<CPred<"::llvm::isa<::my::BufferType>($_self)">>;
+// ===============================================
+// Interface
+class My_AttrInterface<string name,list<Interface> baseInterfaces = []>
+    :AttrInterface<name,baseInterfaces>{
+  let cppNamespace = "::my";
+}
 
+def DistributeParallelAttrInterface : My_AttrInterface<"DistributeParallelAttrInterface",[]> {
+  let description = "标记数据并行的属性";
+}
+
+def DataParallelAttrInterface: My_AttrInterface<"DataParallelAttrInterface",[DistributeParallelAttrInterface]> {
+  let description = "数据并行属性";
+  let methods = [
+    InterfaceMethod<"并行数量","int64_t","getDP">,
+    InterfaceMethod<"设备id","::mlir::ArrayRef<int64_t>","getDeviceIds">
+  ];
+}
+
+class My_OpInterface<string name, list<Interface> baseInterfaces = []>
+    : OpInterface<name,baseInterfaces> {
+    let cppNamespace = "::my";
+}
+
+def DistributeParallelOpInterface : My_OpInterface<"DistributeParallelOpInterface"> {
+  let description = "可并行化的Op";
+  let methods = [
+    InterfaceMethod<"执行并行化转换",
+        "::mlir::LogicalResult",
+        "applyDistribution",
+        (ins "::my::DistributeParallelAttrInterface":$disAttr)>,
+    InterfaceMethod<"判断是否可以支持该并行化",
+        "bool",
+        "supportsDistribution",
+        (ins "::my::DistributeParallelAttrInterface":$disAttr)>
+  ];
+}
+
+
+// ===============================================
+// Attribute
+class My_Attribute<string name,  string attrMnemonic, list<Trait> traits = []>
+    : AttrDef<My_Dialect, name, traits> {
+  let mnemonic = attrMnemonic;
+}
+
+def My_DataParallelism : My_Attribute<"DataParallelism","DP",[DeclareAttrInterfaceMethods<DataParallelAttrInterface>]> {
+  let parameters = (ins
+    "int64_t":$dpNum,
+    ArrayRefParameter<"int64_t">:$deviceIds
+  );
+  let assemblyFormat = [{
+  `<` $dpNum `:` $deviceIds `>`
+  }];
+}
+
+// ===============================================
+// Op
 class My_Op<string mnemonic, list<Trait> traits = []>
     : Op<My_Dialect, mnemonic, traits> {
   let summary = cppNamespace#opName#"op";

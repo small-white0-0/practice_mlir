@@ -1,0 +1,7 @@
+#ifndef PRACTICE_MLIR_MYATTRINTERFACES_H
+#define PRACTICE_MLIR_MYATTRINTERFACES_H
+
+#include "IR/MyDialect.h"
+#include "IR/MyAttrInterfaces.h.inc"
+
+#endif //PRACTICE_MLIR_MYATTRINTERFACES_H

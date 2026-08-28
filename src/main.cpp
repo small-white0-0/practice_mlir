@@ -3,6 +3,8 @@
 #include "IR/MyDialect.h"
 #include "IR/MyTypes.h"
 #include "IR/MyOps.h"
+#include "IR/MyAttrs.h"
+#include "key.h"
 
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -81,6 +83,47 @@ int main() {
         llvm::errs() << "All to All Op :\n";
         all_to_all_op->dump();
         moduleOp.dump();
+    }
+    // 测试属性
+    {
+        auto builder = mlir::OpBuilder(&context);
+        const auto loc = builder.getUnknownLoc();
+        auto moduleOp = mlir::ModuleOp::create(builder, loc);
+        // builder.setInsertionPointToStart(moduleOp->getBody());  // 会报错。
+        builder.setInsertionPointToStart(moduleOp.getBody());
+        const auto f32 = mlir::Float32Type::get(&context);
+        const auto tensorType = my::MyTensorType::get(&context, {2, 3}, f32);
+        auto const_v = my::ConstantOp::create(
+            builder,
+            loc,
+            tensorType,
+            mlir::DenseElementsAttr::get(
+                mlir::RankedTensorType::get({2, 2}, f32),
+                {1.0f, 1.0f, 1.0f, 1.0f})
+        );
+        auto softmax_op = my::SoftmaxOp::create(builder, loc, const_v, 1);
+        llvm::errs() << "bare Softmax Op :\n";
+        softmax_op->dump();
+        const auto dpAttr = my::DataParallelismAttr::get(
+            &context,
+            3,
+            {0, 1, 2}
+        );
+        softmax_op->setAttr(my::KDPAttrName, dpAttr);
+        llvm::errs() << "added attribute  Softmax Op :\n";
+        softmax_op->dump();
+        llvm::errs() << "try read dpattr （as my::DataParallelAttrInterface)  of softmax Op\n";
+        const auto readDpAttr = softmax_op->getAttr(my::KDPAttrName);
+        if (const auto readDpAttr1 = mlir::cast_or_null<my::DataParallelAttrInterface>(readDpAttr)) {
+            const auto dp = readDpAttr1.getDP();
+            const auto devices = readDpAttr1.getDeviceIds();
+            llvm::errs() << "my::DataParallelAttrInterface::getDP() = " << dp << "\n";
+            llvm::errs() << "my::DataParallelAttrInterface::getDeviceIds() = ";
+            for (const auto device: devices) {
+                llvm::errs() << device << ",";
+            }
+            llvm::errs() << "\n";
+        }
     }
     std::cout << "Hello, World!" << std::endl;
 

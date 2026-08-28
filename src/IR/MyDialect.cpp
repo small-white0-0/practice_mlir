@@ -6,5 +6,6 @@ namespace my {
         llvm::outs() << "MyDialect::initialize\n";
         registerTypes();
         registerOps();
+        registerAttrs();
     }
 }
