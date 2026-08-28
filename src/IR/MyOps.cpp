@@ -1,5 +1,6 @@
 #include "IR/MyOps.h"
 #define GET_OP_CLASSES
+#include "../key.h"
 #include "IR/MyOps.cpp.inc"
 
 #include "IR/MyDialect.h"
@@ -65,5 +66,26 @@ namespace my {
             axis < 0 || axis >= returnType.getShape().size())
             return mlir::failure();
         return mlir::success();
+    }
+
+    ::mlir::LogicalResult SoftmaxOp::applyDistribution(::my::DistributeParallelAttrInterface disAttr) {
+        const auto dataDisAttr = mlir::cast_or_null<my::DataParallelAttrInterface>(disAttr);
+        if (!dataDisAttr) {
+            return mlir::failure();
+        }
+        auto op = getOperation();
+        mlir::OpBuilder builder = mlir::OpBuilder(op);
+        builder.setInsertionPointAfter(op);
+        // 因为后面会移除这个op,所以先同样复制一份,替换。
+        // TODO: 暂时什么也不做,之后再重写转化。
+        auto nop = SoftmaxOp::create(builder, this->getLoc(), this->getInput(), this->getAxis());
+        nop->setAttr(my::KDeviceFunc, mlir::StringAttr::get(getContext(), "todo"));
+        replaceAllUsesWith(nop.getResult());
+
+        return mlir::success();
+    }
+
+    bool SoftmaxOp::supportsDistribution(::my::DistributeParallelAttrInterface disAttr) {
+        return mlir::isa<my::DataParallelAttrInterface>(disAttr);
     }
 }

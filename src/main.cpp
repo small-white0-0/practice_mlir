@@ -5,6 +5,10 @@
 #include "IR/MyOps.h"
 #include "IR/MyAttrs.h"
 #include "key.h"
+#include "Transforms/MyPasses.h"
+
+#include "mlir/Pass/PassManager.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -14,7 +18,7 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/MLIRContext.h"
 
-int main() {
+int test1() {
     const mlir::DialectRegistry registry;
     mlir::MLIRContext context(registry);
     // 加载 MyDialect
@@ -39,7 +43,7 @@ int main() {
         auto loc = builder.getUnknownLoc();
 
         // 创建一个ModuleOp
-        auto moduleOp = builder.create<mlir::ModuleOp>(loc);
+        auto moduleOp = mlir::ModuleOp::create(builder, loc);
         // 设置builder的插入点到moduleOp的body
         builder.setInsertionPointToStart(moduleOp.getBody());
 
@@ -52,7 +56,7 @@ int main() {
         const auto value_tensorType = my::MyTensorType::get(&context, {2, 2}, f32);
         const auto value_tensorType1 = my::MyTensorType::get(&context, {2, 2}, f32, 1);
         value.dump();
-        auto const_v1 = builder.create<my::ConstantOp>(loc, value_tensorType, value);
+        auto const_v1 = my::ConstantOp::create(builder, loc, value_tensorType, value);
         auto const_v2 = my::ConstantOp::create(builder, loc, value_tensorType, value);
         auto const_v3 = my::ConstantOp::create(builder, loc, value_tensorType1, value);
         auto const_v4 = my::ConstantOp::create(builder, loc, value_tensorType1, value);
@@ -126,6 +130,74 @@ int main() {
         }
     }
     std::cout << "Hello, World!" << std::endl;
-
     return 0;
+}
+
+
+mlir::ModuleOp getModule(mlir::OpBuilder &builder) {
+    auto loc = builder.getUnknownLoc();
+    auto context = builder.getContext();
+    auto module = mlir::ModuleOp::create(builder, loc, "My");
+    builder.setInsertionPointToStart(module.getBody());
+    auto f32 = mlir::Float32Type::get(context);
+    auto dy_dim = 128;
+    auto dy_shape = mlir::SmallVector<int64_t>({dy_dim, dy_dim, 24});
+    auto dy_tensor_type =
+            my::MyTensorType::get(context, dy_shape, f32, 0);
+    auto func_type =
+            mlir::FunctionType::get(context, {dy_tensor_type}, {dy_tensor_type});
+    auto func =
+            mlir::func::FuncOp::create(builder, loc, my::KEntryPointName, func_type);
+    func->setAttr(my::KHostFunc, builder.getUnitAttr());
+    func->setAttr(my::KDPAttrName,
+                  my::DataParallelismAttr::get(context, 2, {0, 1}));
+
+    auto block = func.addEntryBlock();
+    builder.setInsertionPointToStart(block);
+    // Softmax Op
+    mlir::Value softmax_op = my::SoftmaxOp::create(builder,
+                                                   loc, block->getArgument(0), 1);
+    softmax_op = my::SoftmaxOp::create(builder, loc, softmax_op, 1);
+    mlir::func::ReturnOp::create(builder, loc, mlir::ValueRange{softmax_op});
+    return module;
+}
+
+int test2() {
+    const mlir::DialectRegistry registry;
+    mlir::MLIRContext context(registry);
+    if (!context.getOrLoadDialect<my::MyDialect>()) {
+        llvm::outs() << "my::MyDialect not loaded\n";
+        return 1;
+    }
+    if (!context.getOrLoadDialect<mlir::func::FuncDialect>()) {
+        llvm::outs() << "mlir::func::FuncDialect not loaded\n";
+        return 1;
+    }
+
+    mlir::OpBuilder builder(&context);
+    auto module = getModule(builder);
+    llvm::errs() << "bare module:\n";
+    module.dump();
+    mlir::PassManager pm(&context);
+    pm.addPass(my::createMarkDistributeParallelParametersPass({.DPNums = 3, .TPNums = 1}));
+    pm.addNestedPass<mlir::func::FuncOp>(my::createApplyDistributeTransformPass());
+    if (pm.run(module).failed()) {
+        llvm::errs() << "pass failed\n";
+        return 1;
+    }
+    llvm::errs() << "pass succeeded\n";
+    llvm::errs() << "transformed module:\n";
+    module.dump();
+    return 0;
+}
+
+int main() {
+    // 根据T调用test1、test2.
+
+#define T 2
+
+#define PASTE2(a, b) a ## b
+#define PASTE(a, b) PASTE2(a, b)
+#define Call() PASTE(test, T)()
+    return Call();
 }

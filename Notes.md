@@ -18,3 +18,21 @@
    >   return $_get($_ctxt, integerArg, floatArg);
    > }]>
    > ```
+
+4. 在tablegen文件中突然很奇怪的报错，原因好像是mlir-tablegen的词法解析存在bug。
+   > 报错：
+   > ```
+   > error: Unexpected token at top level
+   > #endif
+   > ^
+   > ```
+   > 实测，在`#endif`后面加上空白字符或换行符，就解决了。
+   > 目前估计是mlir-tablegen的词法解析在文件的EOF附近的边界情况判断存在问题。
+   
+5. 补记: dialect中的`useDefaultTypePrinterParser`和`useDefaultAttributePrinterParser`没有特殊原因一定要开启。
+   > 原因：因为type和attribute的`assemblyFormat`字段自动生成的方法会依赖默认的printerParser,
+   > 如果不开启，后面的type和attribute的该字段就相当于用不了了。
+
+6. mlir生成的Pass默认是没有命名空间的，所以在倒入生成代码时，要加上命名空间。
+7. mlir的整数类型注意`iN`表示符号无关的`N`位整数，`siN`和`uiN` 才是分别表示有符号`N`位整数和无符号`N`位整数。
+8. 

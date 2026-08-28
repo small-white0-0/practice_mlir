@@ -147,7 +147,7 @@ def My_ConstantOp : My_Op<"constant", []> {
 }
 
 
-def My_SoftmaxOp : My_UnaryOp<"softmax",AnyMyTensor, AnyMyTensor, [], (ins I64Attr:$axis)>{
+def My_SoftmaxOp : My_UnaryOp<"softmax",AnyMyTensor, AnyMyTensor, [DeclareOpInterfaceMethods<DistributeParallelOpInterface>], (ins I64Attr:$axis)>{
     let hasVerifier = 1;
     let builders = [
         OpBuilder<(ins "::mlir::Value":$input, "int64_t":$axis) ,
