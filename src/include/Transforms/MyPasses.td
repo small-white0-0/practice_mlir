@@ -30,5 +30,11 @@ def ApplyDistributeTransformPass : Pass<"apply-distribute-transform","::mlir::fu
     ];
 }
 
+def DeviceRegionFusionPass : Pass<"device-region-fusion","::mlir::func::FuncOp"> {
+    let summary = "合并多个op";
+    let dependentDialects = [
+    "my::MyDialect"
+    ];
+}
 
 #endif // MY_PASSED_TD

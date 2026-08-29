@@ -8,6 +8,7 @@
 #include "Transforms/MyPasses.h"
 
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/Passes.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 
 #include "mlir/IR/DialectRegistry.h"
@@ -181,6 +182,8 @@ int test2() {
     mlir::PassManager pm(&context);
     pm.addPass(my::createMarkDistributeParallelParametersPass({.DPNums = 3, .TPNums = 1}));
     pm.addNestedPass<mlir::func::FuncOp>(my::createApplyDistributeTransformPass());
+    pm.addPass(mlir::createCanonicalizerPass()); // 调用op定义的规范化方法，这个一定要在ApplyDistributeTransformPass后面注册
+    pm.addNestedPass<mlir::func::FuncOp>(my::createDeviceRegionFusionPass()); // 对并行化后的op收集到fusionOp中
     if (pm.run(module).failed()) {
         llvm::errs() << "pass failed\n";
         return 1;

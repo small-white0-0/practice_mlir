@@ -35,4 +35,17 @@
 
 6. mlir生成的Pass默认是没有命名空间的，所以在倒入生成代码时，要加上命名空间。
 7. mlir的整数类型注意`iN`表示符号无关的`N`位整数，`siN`和`uiN` 才是分别表示有符号`N`位整数和无符号`N`位整数。
-8. 
+8. 突然发现自己因为跟着写，命名风格完全是混乱的。下次记得一开始记一下社区的命名风格。
+9. `mlir::isa<mlir::BlockArgument>(operand)` 这个判断一定要记得做，因为如果是块参数，某些方法不是返回空，而是会导致段错误的。
+10. 规范化的方法执行需要Pass进行，同时Pass添加的时候需要注意添加顺序。
+    > 因为最初看教程说是规范化方法会自动执行，结果写完发现不执行。搜索了才知道还是要依靠pass执行，需要进行pass添加。
+    > 下意识的根据根op添加了，如下:
+    > ```
+    > pm.addPass(my::createMarkDistributeParallelParametersPass({.DPNums = 3, .TPNums = 1}));
+    > pm.addPass(mlir::createCanonicalizerPass());
+    > pm.addNestedPass<mlir::func::FuncOp>(my::createApplyDistributeTransformPass());
+    > ```
+    > 结果还是不执行规范化方法。
+    > 试了半天才注意到`buffer_cast`是`ApplyDistributeTransformPass`创建的，
+    > 那么pass按照顺序执行，`buffer_cast`的规范化方法肯定不能执行了。
+11. 多个op删除时，一定要使用倒序的删除顺序，不然死代码之间的use会导致前面的op无法删除。没有依赖关系的也建议这么做，形成良好习惯。

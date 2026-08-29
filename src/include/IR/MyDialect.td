@@ -5,6 +5,10 @@ include "mlir/IR/DialectBase.td"
 include "mlir/IR/OpBase.td"
 include "mlir/IR/AttrTypeBase.td"
 include "mlir/IR/Interfaces.td"
+include "mlir/IR/OpAsmInterface.td"
+include "mlir/IR/RegionKindInterface.td"
+include "mlir/IR/BuiltinTypeInterfaces.td"
+include "mlir/IR/PatternBase.td"
 
 def My_Dialect : Dialect {
   let name = "my";
@@ -29,7 +33,7 @@ class My_Type<string name, string typeMnemonic, list<Trait> traits = [],
   let typeName = My_Dialect.name # "." # typeMnemonic;
 }
 
-def My_TensorType : My_Type<"MyTensor", "my_tensor", []> {
+def My_TensorType : My_Type<"MyTensor", "my_tensor", [ShapedTypeInterface],"::mlir::TensorType"> {
   let description = [{
     A tensor type with a shape and an element type.
   }];
@@ -64,6 +68,7 @@ def My_BufferType : My_Type<"Buffer","buffer",[]>{
 
 }
 def AnyBuffer : Type<CPred<"::llvm::isa<::my::BufferType>($_self)">>;
+def AnyBufferOrMyTensor : AnyTypeOf<[AnyBuffer,AnyMyTensor]>;
 // ===============================================
 // Interface
 class My_AttrInterface<string name,list<Interface> baseInterfaces = []>
@@ -102,6 +107,12 @@ def DistributeParallelOpInterface : My_OpInterface<"DistributeParallelOpInterfac
   ];
 }
 
+def FusionRegionOpInterface : My_OpInterface<"FusionRegionOpInterface"> {
+    let methods = [
+        StaticInterfaceMethod<"合并Ops","mlir::LogicalResult","FusionOps",
+            (ins "::mlir::RewriterBase&":$rewriter, "mlir::ArrayRef<mlir::Operation*>":$ops,"::mlir::Location":$loc)>
+    ];
+}
 
 // ===============================================
 // Attribute
@@ -225,4 +236,37 @@ def My_PrintOp: My_Op<"print",[]>{
         AnyType:$input
     );
 }
+
+def My_DeviceKernelOp: My_Op<"device_region",
+    [DeclareOpInterfaceMethods<FusionRegionOpInterface,["FusionOps"]>,AffineScope, AutomaticAllocationScope,IsolatedFromAbove,
+        OpAsmOpInterface ]# GraphRegionNoTerminator.traits>{
+    let arguments = (ins
+        SymbolNameAttr:$sym_name,
+        I64Attr:$device_id,
+        Variadic<AnyType>:$args
+    );
+
+    let regions = (region SizedRegion<1>:$region);
+
+    let results = (outs Variadic<AnyType>:$result);
+
+}
+
+def My_BufferCast : My_Op<"buffer_cast",[]> {
+    let summary = "切分和合并";
+    let arguments = (ins
+        Variadic<AnyMyTensor>: $operands,
+        DistributeParallelAttrInterface: $disAttr
+    );
+    let results = (outs Variadic<AnyMyTensor>: $results);
+    // 生成规范化的方法，用于去除不必要的cast
+    let hasCanonicalizeMethod = true;
+}
+
+def My_ReturnOp : My_Op<"return_op"> {
+    let summary = "return operation";
+    let arguments = (ins Variadic<AnyType>:$operands);
+    let assemblyFormat = "attr-dict ($operands^ `:` type($operands))?";
+}
+
 #endif

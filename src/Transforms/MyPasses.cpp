@@ -1,5 +1,7 @@
 #include "Transforms/MyPasses.h"
 
+#include <IR/MyOps.h>
+
 
 #include "IR/MyAttrs.h"
 #include "IR/MyDialect.h"
@@ -11,6 +13,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Vectorize/SandboxVectorizer/Debug.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 namespace my {
 #define GEN_PASS_DEF_MARKDISTRIBUTEPARALLELPARAMETERSPASS
@@ -82,6 +85,72 @@ namespace my {
                 }
             });
             LLVM_DEBUG(llvm::dbgs() << llvm::formatv("run out: {0}\n", getPassName()));
+        }
+    };
+}
+
+namespace my {
+    // namespace {
+    struct BufferCastOpDeviceRegionFusion : mlir::OpRewritePattern<::my::BufferCast> {
+        // 使用using 自动继承父类的构造函数
+        using mlir::OpRewritePattern<::my::BufferCast>::OpRewritePattern;
+
+        void addops(llvm::SetVector<mlir::Operation *> &ops, mlir::Operation *op) const {
+            if (!mlir::isa<my::DistributeParallelOpInterface>(op)) return;
+            ops.insert(op);
+            for (auto user: op->getUsers()) {
+                addops(ops, user);
+            }
+        }
+
+        virtual mlir::LogicalResult matchAndRewrite(BufferCast op, mlir::PatternRewriter &rewriter) const override {
+            // match判断
+            // 1. 是scatter
+            // 2. 后继不是devicekernelop
+            if (op.getOperands().size() != 1) return mlir::failure();
+            for (auto user: op.getResult(0).getUsers()) {
+                if (mlir::isa<my::DeviceKernelOp>(user)) {
+                    return mlir::failure();
+                }
+            }
+
+            auto loc = op->getLoc();
+            llvm::SmallVector<llvm::SetVector<mlir::Operation *> > op_list;
+            for (auto res: op->getResults()) {
+                rewriter.setInsertionPointAfterValue(res);
+                llvm::SetVector<mlir::Operation *> ops;
+                for (auto use: res.getUsers()) {
+                    addops(ops, use);
+                }
+                if (!ops.empty()) op_list.push_back(ops);
+            }
+            if (op_list.empty()) return llvm::failure();
+            for (auto ops: op_list) {
+                if (!my::DeviceKernelOp::FusionOps(rewriter, ops.takeVector(), loc)
+                    .succeeded()) {
+                    LLVM_DEBUG(llvm::dbgs() << llvm::formatv("fusion error!"));
+                    return llvm::failure();
+                };
+            }
+            return llvm::success();
+        }
+    };
+
+    // }
+
+#define GEN_PASS_DEF_DEVICEREGIONFUSIONPASS
+#include "Transforms/MyPasses.h.inc"
+
+    struct DeviceRegionFusionPass : impl::DeviceRegionFusionPassBase<DeviceRegionFusionPass> {
+    protected:
+        void runOnOperation() override {
+            mlir::RewritePatternSet pat_set(&getContext());
+            pat_set.addWithLabel<BufferCastOpDeviceRegionFusion>(
+                mlir::StringRef("BufferCastOpDeviceRegionFusion"), pat_set.getContext(), 100);
+            if (mlir::applyPatternsGreedily(getOperation(),
+                                            mlir::FrozenRewritePatternSet(std::move(pat_set))).failed()) {
+                signalPassFailure();
+            }
         }
     };
 }
