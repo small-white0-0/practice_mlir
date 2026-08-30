@@ -11,6 +11,7 @@
 namespace my {
 // 这个其实能拿到的就只有create方法了。
 #define GEN_PASS_DECL
+#define GEN_PASS_REGISTRATION
 #include "Transforms/MyPasses.h.inc"
 }
 #endif //PRACTICE_MLIR_MYPASSES_H

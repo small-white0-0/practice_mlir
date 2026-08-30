@@ -49,3 +49,18 @@
     > 试了半天才注意到`buffer_cast`是`ApplyDistributeTransformPass`创建的，
     > 那么pass按照顺序执行，`buffer_cast`的规范化方法肯定不能执行了。
 11. 多个op删除时，一定要使用倒序的删除顺序，不然死代码之间的use会导致前面的op无法删除。没有依赖关系的也建议这么做，形成良好习惯。
+12. 此处稍微补充一下mlir的tablegen和library的cmake函数。
+    > tablegen方面主要有：
+    > 1. `mlir_tablegen` ： 执行tablegen生成文件
+    > 2. `add_mlir_dialect_tablegen_target` ： 封装llvm的`add_public_tablegen_target`，并将target添加到mlir-headers的依赖中。要紧接着连续的`tablegen`之后使用。
+    > 3. `add_mlir_generic_tablegen_target` ： 类似add_mlir_dialect_tablegen_target，只是将target添加到 mlir-generic-headers 的依赖，想表示dialect无关的tablegen生成。
+    > 
+    > PS: 吐槽一下后面两个target函数，注释是这说的，但是我看mlir里面的Dialect中的CMakeLists.txt文件，发现有些完全是乱来的，例如Linalg，全是`add_mlir_dialect_tablegen_target`。
+    > 
+    > library方面主要有:
+    > 1. `add_mlir_library` ： 就是会把library也添加到libMLIR.so，处理这些和mlir依赖的内容，一般用的少，更多的是用`add_mlir_.*_library`之类的封装函数。
+    > 2. `add_mlir_dialect_library`: 封装`add_mlir_library`，就是会将target添加到`MLIR_DIALECT_LIBS`变量中。表示library是dialect相关的。
+    > 3. `add_mlir_conversion_library` ： 类似的，只是将target添加到`MLIR_CONVERSION_LIBS`变量中。表示library是conversion相关的，负责跨Dialect的变换。
+    > 4. `add_mlir_translation_library` : ......................`MLIR_TRANSLATION_LIBS`...。表示library是translation相关的，负责从MLIR方言向外部转换，如LLVM IR.
+    > 
+    > 其他还有很多，用的不多，就这样了。
