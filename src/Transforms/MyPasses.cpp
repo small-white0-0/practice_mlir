@@ -84,6 +84,7 @@ namespace my {
                     }
                 }
             });
+            func->removeAttr(KDPAttrName);
             LLVM_DEBUG(llvm::dbgs() << llvm::formatv("run out: {0}\n", getPassName()));
         }
     };
