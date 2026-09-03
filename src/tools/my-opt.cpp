@@ -18,6 +18,7 @@
 
 #include "Transforms/MyPasses.h"
 #include "IR/MyDialect.h"
+#include "Conversion/MyConversionPass.h"
 
 using namespace llvm;
 using namespace mlir;
@@ -457,6 +458,7 @@ int main(int argc, char **argv) {
     registerAllExtensions(registry);
     registry.insert<my::MyDialect>();
     my::registerPasses();
+    my::conversion::registerMyConversionPasses();
     // TODO: Remove this and the corresponding MLIRToLLVMIRTranslationRegistration
     // cmake dependency when a safe dialect interface registration mechanism is
     // implemented, see D157703 (and corresponding note on the declaration).

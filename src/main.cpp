@@ -6,7 +6,9 @@
 #include "IR/MyAttrs.h"
 #include "key.h"
 #include "Transforms/MyPasses.h"
-
+#include "Conversion/MyConversionPass.h"
+#include "mlir/InitAllDialects.h"
+#include "mlir/Conversion/Passes.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/Passes.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -18,6 +20,11 @@
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/InitAllDialects.h"
+
+int test0() {
+    return 0;
+}
 
 int test1() {
     const mlir::DialectRegistry registry;
@@ -149,9 +156,6 @@ mlir::ModuleOp getModule(mlir::OpBuilder &builder) {
             mlir::FunctionType::get(context, {dy_tensor_type}, {dy_tensor_type});
     auto func =
             mlir::func::FuncOp::create(builder, loc, my::KEntryPointName, func_type);
-    func->setAttr(my::KHostFunc, builder.getUnitAttr());
-    func->setAttr(my::KDPAttrName,
-                  my::DataParallelismAttr::get(context, 2, {0, 1}));
 
     auto block = func.addEntryBlock();
     builder.setInsertionPointToStart(block);
@@ -160,6 +164,43 @@ mlir::ModuleOp getModule(mlir::OpBuilder &builder) {
                                                    loc, block->getArgument(0), 1);
     softmax_op = my::SoftmaxOp::create(builder, loc, softmax_op, 1);
     mlir::func::ReturnOp::create(builder, loc, mlir::ValueRange{softmax_op});
+    return module;
+}
+
+mlir::ModuleOp getModule1(mlir::OpBuilder &builder) {
+    auto loc = builder.getUnknownLoc();
+    auto context = builder.getContext();
+    auto module = mlir::ModuleOp::create(builder, loc, "My");
+    builder.setInsertionPointToStart(module.getBody());
+    auto f32 = mlir::Float32Type::get(context);
+    auto dy_dim = 128;
+    auto dy_shape = mlir::SmallVector<int64_t>({dy_dim, dy_dim, 24});
+    auto dy_tensor_type =
+            my::MyTensorType::get(context, dy_shape, f32, 0);
+    auto func_type =
+            mlir::FunctionType::get(context, {}, {});
+    auto func =
+            mlir::func::FuncOp::create(builder, loc, my::KEntryPointName, func_type);
+
+    auto block = func.addEntryBlock();
+    builder.setInsertionPointToStart(block);
+    // const_v
+    std::vector<float> values(
+        dy_dim * dy_dim * 24,
+        1.0f);
+    auto const_v = my::ConstantOp::create(
+        builder,
+        loc,
+        dy_tensor_type,
+        mlir::DenseElementsAttr::get(
+            mlir::RankedTensorType::get(dy_tensor_type.getShape(), f32),
+            mlir::ArrayRef<float>(values)
+        ));
+    // Softmax Op
+    mlir::Value softmax_op = my::SoftmaxOp::create(builder,
+                                                   loc, const_v, 1);
+    // softmax_op = my::SoftmaxOp::create(builder, loc, softmax_op, 1);
+    mlir::func::ReturnOp::create(builder, loc, mlir::ValueRange{});
     return module;
 }
 
@@ -193,6 +234,44 @@ int test2() {
     module.dump();
     return 0;
 }
+
+int test3() {
+    const mlir::DialectRegistry registry;
+    mlir::MLIRContext context(registry);
+    // 注册内置的所有dialect
+    mlir::registerAllDialects(context);
+    if (!context.getOrLoadDialect<my::MyDialect>()) {
+        llvm::outs() << "my::MyDialect not loaded\n";
+        return 1;
+    }
+    if (!context.getOrLoadDialect<mlir::func::FuncDialect>()) {
+        llvm::outs() << "mlir::func::FuncDialect not loaded\n";
+        return 1;
+    }
+
+    mlir::OpBuilder builder(&context);
+    auto module = getModule1(builder);
+    llvm::errs() << "bare module:\n";
+    module.dump();
+    mlir::PassManager pm(&context);
+    pm.addPass(my::createMarkDistributeParallelParametersPass({.DPNums = 3, .TPNums = 1}));
+    pm.addNestedPass<mlir::func::FuncOp>(my::createApplyDistributeTransformPass());
+    pm.addPass(mlir::createCanonicalizerPass()); // 调用op定义的规范化方法，这个一定要在ApplyDistributeTransformPass后面注册
+    pm.addNestedPass<mlir::func::FuncOp>(my::createDeviceRegionFusionPass()); // 对并行化后的op收集到fusionOp中
+    pm.addPass(my::conversion::createConversoinMyToBuiltin()); // 执行ir conversion
+    // pm.addPass(mlir::createReconcileUnrealizedCastsPass()); // 对unrealizedcastop的规范化的消除，但是，convert插入该操作会延迟，对于一些不需要的情况会自动删除。
+
+
+    if (pm.run(module).failed()) {
+        llvm::errs() << "pass failed\n";
+        return 1;
+    }
+    llvm::errs() << "final module:\n";
+    module.dump();
+
+    return 0;
+}
+
 
 int main() {
     // 根据T调用test1、test2.

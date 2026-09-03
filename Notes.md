@@ -64,3 +64,64 @@
     > 4. `add_mlir_translation_library` : ......................`MLIR_TRANSLATION_LIBS`...。表示library是translation相关的，负责从MLIR方言向外部转换，如LLVM IR.
     > 
     > 其他还有很多，用的不多，就这样了。
+13. 看mlir的源码，发现自己不知道的c++模板的语法知识，记录一下。
+    > 因为根据模板进行符号使用时，编译器默认是解析为变量或函数的值。针对类型的情况就需要特殊添加`typename`表示该符号是类型。
+    > 类似的模板也一样，需要使用`template`表示该符号是模板。至于语法的话，参考下面的代码，就行了。
+    > 
+    > ```
+    > struct A {
+    >     inline static int get = 1;
+    > };
+    > 
+    > struct B {
+    >     using get = int;
+    > };
+    > 
+    > struct C {
+    >     template<typename T>
+    >     const static T get = T(1);
+    > };
+    > 
+    > struct D {
+    >     template<typename T>
+    >     struct get {
+    >         T value;
+    >     };
+    > };
+    > 
+    > template<typename T>
+    > int forA() {
+    >     return T::get;
+    > }
+    > 
+    > template<typename T>
+    > int forB() {
+    >     typename T::get ret = 1;
+    >     return ret;
+    > }
+    > 
+    > template<typename T>
+    > int forC() {
+    >     return T::template get<int>;
+    > }
+    > 
+    > template<typename T>
+    > auto forD() {
+    >     typename T::template get<int> ret = {1};
+    >     return ret;
+    > }
+    > 
+    > ```
+    > 
+
+14. mlir conversion的`applyPartialConversion`和`applyFullConversion`的区别。
+    > mlir源码注释里面只说了`applyPartialConversion`会忽略转换的失败，允许非法操作与其他操作的共存。 
+    > 但是实际测试效果是：`applyPartialConversion`对于明确标记为非法操作的情况，是不会忽略的。
+    > 
+    > 所以其实op是具有三种状态的：default（不进行标记的情况）,legal,illegal.
+    > 
+    > `applyFullConversion`：要求所有op都是legal。
+    > `applyPartialConversion`： 要求不存在 illegal op。
+    > legal是绝对不会检查pattern执行重写，default 和 illegal 都会检查 pattern 进行重写，
+    > 但是对于失败之后的处理不一样。
+15. `mlir::TypeConverter::convertBlockSignature` 虽然是convert开头，但是它和其他convert不一样不是直接返回转换之后的block块，而是返回一个`mlir::TypeConverter::SignatureConversion`对象，只是提供块参数的类型转换，实际使用一般还需要配合`mlir::ConversionPatternRewrite::applySignatureConversion`才能等到转换后的block。虽然其实针对region的情况，直接使用`mlir::ConversionPatternRewrite::convertRegionTypes`，更简单。
