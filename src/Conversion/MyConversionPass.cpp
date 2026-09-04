@@ -20,13 +20,12 @@
 
 
 namespace my::conversion {
-#define GEN_PASS_DEF_CONVERSOINMYTOBUILTIN
+#define GEN_PASS_DEF_CONVERTMYTOBUILTIN
 #include "Conversion/MyConversionPass.h.inc"
 
-    struct MyConversionPass : public impl::ConversoinMyToBuiltinBase<MyConversionPass> {
+    struct MyConversionPass : impl::ConvertMyToBuiltinBase<MyConversionPass> {
         // 继承构造函数
-        using impl::ConversoinMyToBuiltinBase<MyConversionPass>::ConversoinMyToBuiltinBase;
-
+        using Base::Base;
     protected:
         // 重载执行
         void runOnOperation() override;

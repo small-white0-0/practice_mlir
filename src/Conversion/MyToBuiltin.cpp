@@ -13,8 +13,8 @@ namespace my {
 
             llvm::LogicalResult matchAndRewrite(SoftmaxOp op, OpAdaptor adaptor,
                                                 mlir::ConversionPatternRewriter &rewriter) const override {
-                auto loc = op.getLoc();
-                int64_t axis = op.getAxis();
+                const auto loc = op.getLoc();
+                const int64_t axis = op.getAxis();
 
                 // 1. 获取转换后的输入
                 auto input = adaptor.getOperands()[0];
@@ -22,9 +22,11 @@ namespace my {
                 auto outputType = inputType; // 输入输出前后shape和elementType是一样的。
 
                 // 2. 创建空的输出张量 (Destination-Passing Style)
-                auto emptyOutput = rewriter.create<mlir::tensor::EmptyOp>(
-                    loc, outputType.getShape(), outputType.getElementType());
-
+                auto emptyOutput = mlir::tensor::EmptyOp::create(
+                    rewriter,
+                    loc,
+                    outputType.getShape(),
+                    outputType.getElementType());
 
                 // 4. 创建 linalg.softmax 算子
                 auto softmaxOp = mlir::linalg::SoftmaxOp::create(
@@ -97,8 +99,7 @@ namespace my {
                     // 恢复insertPointer
                     rewriter.restoreInsertionPoint(savedPoint);
                 } else if (!mlir::dyn_cast<mlir::func::FuncOp>(funOp)) {
-                    rewriter.notifyMatchFailure(op->getLoc(),llvm::formatv("{} 已经有了，但是不是funcOp",symName));
-                    return mlir::failure();
+                    return rewriter.notifyMatchFailure(op->getLoc(), llvm::formatv("{} 已经有了，但是不是funcOp", symName));
                 }
 
                 // call
@@ -137,7 +138,8 @@ namespace my {
                         int64_t size = shape[0];
 
                         // 生成 extract_slice
-                        auto slice = rewriter.create<tensor::ExtractSliceOp>(
+                        auto slice = tensor::ExtractSliceOp::create(
+                            rewriter,
                             loc,
                             resTensorType, // 结果类型
                             input, // 源张量
@@ -174,8 +176,11 @@ namespace my {
                         RankedTensorType>(getTypeConverter()->convertType(op.getResult(0).getType()));
 
                     // 2. 创建空的输出张量
-                    auto empty = rewriter.create<tensor::EmptyOp>(
-                        loc, resultType.getShape(), resultType.getElementType());
+                    auto empty = tensor::EmptyOp::create(
+                        rewriter,
+                        loc,
+                        resultType.getShape(),
+                        resultType.getElementType());
 
                     Value currentOutput = empty;
                     int64_t currentOffset = 0;

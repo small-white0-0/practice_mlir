@@ -3,7 +3,7 @@
 
 include "mlir/Pass/PassBase.td"
 
-def ConversoinMyToBuiltin : Pass<"conversion-my-to-builtin","::mlir::ModuleOp"> {
+def ConvertMyToBuiltin : Pass<"convert-my-to-builtin","::mlir::ModuleOp"> {
     let summary = "把my dialect下降到builtin dialect";
     let description = summary;
     let dependentDialects = [

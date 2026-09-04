@@ -258,7 +258,7 @@ int test3() {
     pm.addNestedPass<mlir::func::FuncOp>(my::createApplyDistributeTransformPass());
     pm.addPass(mlir::createCanonicalizerPass()); // 调用op定义的规范化方法，这个一定要在ApplyDistributeTransformPass后面注册
     pm.addNestedPass<mlir::func::FuncOp>(my::createDeviceRegionFusionPass()); // 对并行化后的op收集到fusionOp中
-    pm.addPass(my::conversion::createConversoinMyToBuiltin()); // 执行ir conversion
+    pm.addPass(my::conversion::createConvertMyToBuiltin()); // 执行ir conversion
     // pm.addPass(mlir::createReconcileUnrealizedCastsPass()); // 对unrealizedcastop的规范化的消除，但是，convert插入该操作会延迟，对于一些不需要的情况会自动删除。
 
 
