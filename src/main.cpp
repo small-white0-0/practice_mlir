@@ -173,7 +173,7 @@ mlir::ModuleOp getModule(mlir::OpBuilder &builder) {
     auto func_type =
             mlir::FunctionType::get(context, {dy_tensor_type}, {dy_tensor_type});
     auto func =
-            mlir::func::FuncOp::create(builder, loc, my::KEntryPointName, func_type);
+            mlir::func::FuncOp::create(builder, loc, "test1", func_type);
 
     auto block = func.addEntryBlock();
     builder.setInsertionPointToStart(block);
@@ -196,7 +196,7 @@ mlir::ModuleOp getModule1(mlir::OpBuilder &builder) {
     auto dy_tensor_type =
             my::MyTensorType::get(context, dy_shape, f32, 0);
     auto func_type =
-            mlir::FunctionType::get(context, {}, {});
+            mlir::FunctionType::get(context, {}, {builder.getI32Type()});
     auto func =
             mlir::func::FuncOp::create(builder, loc, my::KEntryPointName, func_type);
 
@@ -218,7 +218,9 @@ mlir::ModuleOp getModule1(mlir::OpBuilder &builder) {
     mlir::Value softmax_op = my::SoftmaxOp::create(builder,
                                                    loc, const_v, 1);
     // softmax_op = my::SoftmaxOp::create(builder, loc, softmax_op, 1);
-    mlir::func::ReturnOp::create(builder, loc, mlir::ValueRange{});
+    const auto zero = builder.createOrFold<mlir::arith::ConstantOp>(
+        loc, builder.getI32Type(), builder.getI32IntegerAttr(0));
+    mlir::func::ReturnOp::create(builder, loc, mlir::ValueRange{zero});
     return module;
 }
 
@@ -264,6 +266,10 @@ int test3() {
     }
     if (!context.getOrLoadDialect<mlir::func::FuncDialect>()) {
         llvm::outs() << "mlir::func::FuncDialect not loaded\n";
+        return 1;
+    }
+    if (!context.getOrLoadDialect<mlir::arith::ArithDialect>()) {
+        llvm::outs() << "mlir::arith::ArithDialect not loaded\n";
         return 1;
     }
 
