@@ -26,6 +26,7 @@ add_mlir_conversion_library(MLIRMyConversion
         MLIRTensorDialect       # MyTensorType → builtin.tensor 的中间态
         MLIRMemRefDialect       # 最终内存表示（buffer/tensor 的落地）
         MLIRBufferizationDialect # one-shot bufferization（tensor → memref）
+        MLIRTensorToLinalg
 
         # 最终目标（如果需要出 LLVM IR）
         MLIRLLVMDialect

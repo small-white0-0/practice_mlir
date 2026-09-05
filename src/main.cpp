@@ -7,6 +7,7 @@
 #include "key.h"
 #include "Transforms/MyPasses.h"
 #include "Conversion/MyConversionPass.h"
+#include "llvm/Transforms/Vectorize/SandboxVectorizer/Debug.h"
 #include "mlir/InitAllDialects.h"
 #include "mlir/Conversion/Passes.h"
 #include "mlir/Pass/PassManager.h"
@@ -21,6 +22,23 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/InitAllDialects.h"
+#include "mlir/InitAllExtensions.h"
+
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Math/IR/Math.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect//Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "llvm/Support/FileSystem.h"
+#include "mlir/Dialect/Arith/Transforms/BufferDeallocationOpInterfaceImpl.h"
+#include "mlir/Dialect/Arith/Transforms/BufferizableOpInterfaceImpl.h"
+#include "mlir/Dialect/Bufferization/Transforms/FuncBufferizableOpInterfaceImpl.h"
+#include "mlir/Dialect/Linalg/Transforms/BufferizableOpInterfaceImpl.h"
+#include "mlir/Dialect/Tensor/Transforms/BufferizableOpInterfaceImpl.h"
+#include "mlir/Parser/Parser.h"
 
 int test0() {
     return 0;
@@ -272,14 +290,100 @@ int test3() {
     return 0;
 }
 
+std::string SOURCE_FILE("code.mlir");
+std::string OUTPUT_FILE("output.ll");
+#include "mlir/Target/LLVMIR/Dialect/All.h"
 
-int main() {
-    // 根据T调用test1、test2.
+int test4() {
+    mlir::DialectRegistry registry;
+    registry.insert<
+        mlir::linalg::LinalgDialect,
+        mlir::arith::ArithDialect,
+        mlir::math::MathDialect,
+        mlir::func::FuncDialect,
+        mlir::scf::SCFDialect,
+        mlir::tensor::TensorDialect,
+        mlir::memref::MemRefDialect,
+        mlir::bufferization::BufferizationDialect,
+        mlir::LLVM::LLVMDialect,
+        my::MyDialect
+    >();
+    mlir::bufferization::func_ext::registerBufferizableOpInterfaceExternalModels(registry);
+    mlir::arith::registerBufferizableOpInterfaceExternalModels(registry);
+    mlir::tensor::registerBufferizableOpInterfaceExternalModels(registry);
+    mlir::linalg::registerBufferizableOpInterfaceExternalModels(registry);
+    registerAllGPUToLLVMIRTranslations(registry);
 
-#define T 2
+    mlir::MLIRContext context(registry);
+    // 注册自定义错误处理器
+    context.getDiagEngine().registerHandler([](mlir::Diagnostic &diag) {
+        llvm::errs() << "Custom error: " << diag << "\n";
+    });
+    // 解析mlir代码
+    const mlir::ParserConfig config(&context);
+    auto module = mlir::parseSourceFile<mlir::ModuleOp>(SOURCE_FILE, config);
 
-#define PASTE2(a, b) a ## b
-#define PASTE(a, b) PASTE2(a, b)
-#define Call() PASTE(test, T)()
-    return Call();
+    LLVM_DEBUG(module->dump());
+    // 进行下降
+    LLVM_DEBUG(llvm::errs() << "lowering...\n");
+    mlir::PassManager pm(&context);
+    pm.addPass(my::createMarkDistributeParallelParametersPass({.DPNums = 3, .TPNums = 1}));
+    pm.addNestedPass<mlir::func::FuncOp>(my::createApplyDistributeTransformPass());
+    pm.addPass(mlir::createCanonicalizerPass()); // 调用op定义的规范化方法，这个一定要在ApplyDistributeTransformPass后面注册
+    pm.addNestedPass<mlir::func::FuncOp>(my::createDeviceRegionFusionPass()); // 对并行化后的op收集到fusionOp中
+    // pm.addPass(my::conversion::createConvertMyToBuiltin());
+    my::conversion::MyToLLVMPipelineBuilder(pm);
+    if (pm.run(module.get()).failed()) {
+        llvm::errs() << "pass failed\n";
+        return 1;
+    }
+    LLVM_DEBUG(module->dump());
+    llvm::LLVMContext llvmContext;
+    auto llvmModule = mlir::translateModuleToLLVMIR(module.get(), llvmContext, "My");
+    LLVM_DEBUG(llvm::errs() << "to llvm ir.\n";
+        llvmModule->dump(););
+    std::error_code ec;
+    llvm::raw_fd_ostream irFile(OUTPUT_FILE, ec, llvm::sys::fs::OpenFlags::OF_Text);
+    if (ec) {
+        llvm::errs() << "无法创建文件" << OUTPUT_FILE << " : " << ec.message() << "\n";
+        return 1;
+    }
+    llvmModule->print(irFile, nullptr);
+    return 0;
+
+}
+
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        std::cerr << "Usage: " << argv[0] << "<test-num> [<input-file>] [<output-file>]\n";
+    }
+    int test_num = atoi(argv[1]);
+    int ret = 0;
+    switch (test_num) {
+        case 1:
+            ret = test1();
+            break;
+        case 2:
+            ret = test2();
+            break;
+        case 3:
+            ret = test3();
+            break;
+        case 4:
+            if (argc != 3 && argc != 4) {
+                std::cerr << "For test4 Usage: " << argv[0] << " 4 <input-file> [<output-file>]\n";
+                return 1;
+            }
+            SOURCE_FILE.assign(std::string(argv[2]));
+            if (argc >= 3) {
+                OUTPUT_FILE.assign(std::string(argv[3]));
+            }
+            ret = test4();
+            break;
+        default:
+            std::cerr << "Unknown test num: " << test_num << "\n";
+            ret = 1;
+    }
+
+    return ret;
 }

@@ -17,7 +17,12 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect//Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
-
+#include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/Passes.h"
+#include "mlir/Conversion/Passes.h"
+#include "mlir/Dialect/Linalg/Passes.h"
+#include "mlir/Dialect/Bufferization/Transforms/Transforms.h"
+#include "mlir/Dialect/Bufferization/Transforms/Passes.h"
 
 namespace my::conversion {
 #define GEN_PASS_DEF_CONVERTMYTOBUILTIN
@@ -60,5 +65,52 @@ namespace my::conversion {
             signalPassFailure();
         }
         LLVM_DEBUG(llvm::dbgs() << llvm::formatv("run out: {0}\n", getPassName()));
+    }
+
+    void MyToLLVMPipelineBuilder(mlir::OpPassManager &pm) {
+        pm.addPass(my::conversion::createConvertMyToBuiltin());
+        // 下降后优化
+        pm.addPass(mlir::createReconcileUnrealizedCastsPass());
+        pm.addPass(mlir::createCanonicalizerPass());
+        pm.addPass(mlir::createCSEPass());
+
+        // Tensor → Linalg 转换
+        pm.addPass(mlir::createConvertTensorToLinalgPass());
+        pm.addPass(mlir::createLinalgGeneralizeNamedOpsPass());
+        pm.addPass(mlir::createCanonicalizerPass());
+        pm.addPass(mlir::createCSEPass());
+
+        // Bufferization（将张量转换为 MemRef）
+        mlir::bufferization::OneShotBufferizePassOptions bufferizationOptions;
+        bufferizationOptions.bufferizeFunctionBoundaries = true;
+        // 对应 --one-shot-bufferize="bufferize-function-boundaries"
+        pm.addPass(mlir::bufferization::createOneShotBufferizePass(bufferizationOptions));
+        pm.addPass(mlir::createCanonicalizerPass());
+        pm.addPass(mlir::createCSEPass());
+
+        // Linalg → 循环（SCF）
+        pm.addPass(mlir::createConvertLinalgToLoopsPass());
+        pm.addPass(mlir::createCanonicalizerPass());
+        pm.addPass(mlir::createCSEPass());
+
+        // 控制流结构化 → 非结构化（CF）
+        pm.addPass(mlir::createSCFToControlFlowPass());
+        pm.addPass(mlir::createCanonicalizerPass());
+        pm.addPass(mlir::createCSEPass());
+
+        // 各种方言 → LLVM 方言
+        pm.addPass(mlir::createConvertControlFlowToLLVMPass());
+        pm.addPass(mlir::createArithToLLVMConversionPass());
+        pm.addPass(mlir::createConvertIndexToLLVMPass());
+        pm.addPass(mlir::createConvertMathToLLVMPass());
+        pm.addPass(mlir::createConvertFuncToLLVMPass());
+
+        // 收尾：MemRef 完全转换为 LLVM 类型
+        pm.addPass(mlir::createFinalizeMemRefToLLVMConversionPass());
+
+        // 最后的通用优化规范化
+        pm.addPass(mlir::createReconcileUnrealizedCastsPass());
+        pm.addPass(mlir::createCanonicalizerPass());
+        pm.addPass(mlir::createCSEPass());
     }
 }

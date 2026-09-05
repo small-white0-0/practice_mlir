@@ -5,6 +5,8 @@
 #include "mlir/Pass/Pass.h"
 
 namespace my::conversion {
+    void MyToLLVMPipelineBuilder(mlir::OpPassManager &pm);
+
 #define GEN_PASS_DECL
 #define GEN_PASS_REGISTRATION
 #include "Conversion/MyConversionPass.h.inc"
