@@ -180,7 +180,6 @@ mlir::ModuleOp getModule(mlir::OpBuilder &builder) {
     // Softmax Op
     mlir::Value softmax_op = my::SoftmaxOp::create(builder,
                                                    loc, block->getArgument(0), 1);
-    softmax_op = my::SoftmaxOp::create(builder, loc, softmax_op, 1);
     mlir::func::ReturnOp::create(builder, loc, mlir::ValueRange{softmax_op});
     return module;
 }
@@ -217,7 +216,6 @@ mlir::ModuleOp getModule1(mlir::OpBuilder &builder) {
     // Softmax Op
     mlir::Value softmax_op = my::SoftmaxOp::create(builder,
                                                    loc, const_v, 1);
-    // softmax_op = my::SoftmaxOp::create(builder, loc, softmax_op, 1);
     const auto zero = builder.createOrFold<mlir::arith::ConstantOp>(
         loc, builder.getI32Type(), builder.getI32IntegerAttr(0));
     mlir::func::ReturnOp::create(builder, loc, mlir::ValueRange{zero});

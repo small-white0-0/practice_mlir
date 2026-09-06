@@ -1,6 +1,6 @@
 #include "Conversion/MyToBuiltin.h"
 
-#include <IR/MyOps.h>
+#include "IR/MyOps.h"
 
 #include "llvm/Support/FormatVariadic.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -237,6 +237,7 @@ namespace my {
     }
 
     void initMyToBuiltinTypeConvert(mlir::TypeConverter &typeConverter) {
+        typeConverter.addConversion([](mlir::Type t) { return t; });
         typeConverter.addConversion([](MyTensorType t) {
             return mlir::RankedTensorType::get(t.getShape(), t.getElementType());
         });

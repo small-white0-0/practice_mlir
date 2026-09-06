@@ -23,6 +23,7 @@
 #include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/Bufferization/Transforms/Transforms.h"
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
+#include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 
 namespace my::conversion {
 #define GEN_PASS_DEF_CONVERTMYTOBUILTIN
@@ -36,12 +37,18 @@ namespace my::conversion {
         void runOnOperation() override;
     };
 
-    void configConversionTarget(mlir::ConversionTarget &target) {
+    void configConversionTarget(mlir::ConversionTarget &target, mlir::TypeConverter &typeConverter) {
         target.addLegalOp<mlir::ModuleOp>();
         target.addLegalDialect<mlir::linalg::LinalgDialect>();
         target.addLegalDialect<mlir::arith::ArithDialect>();
         target.addLegalDialect<mlir::math::MathDialect>();
-        target.addLegalDialect<mlir::func::FuncDialect>();
+        // target.addLegalDialect<mlir::func::FuncDialect>(); // 需要执行func的type转换pattern，所以不能直接标记为legal,需要使用动态标记
+        target.addDynamicallyLegalOp<mlir::func::FuncOp>([&](mlir::func::FuncOp op) {
+            return typeConverter.isSignatureLegal(op.getFunctionType());
+        });
+        target.addDynamicallyLegalOp<mlir::func::CallOp, mlir::func::ReturnOp>([&](mlir::Operation *op) {
+            return typeConverter.isLegal(op);
+        });
         target.addLegalDialect<mlir::scf::SCFDialect>();
         target.addLegalDialect<mlir::tensor::TensorDialect>();
         target.addLegalDialect<mlir::memref::MemRefDialect>();
@@ -58,8 +65,11 @@ namespace my::conversion {
         initMyToBuiltinTypeConvert(typeConverter);
         mlir::RewritePatternSet patterns(module.getContext());
         populateMyToBuiltinPatterns(typeConverter, patterns);
+        mlir::populateFunctionOpInterfaceTypeConversionPattern<mlir::func::FuncOp>(patterns, typeConverter);
+        mlir::populateReturnOpTypeConversionPattern(patterns, typeConverter);
+        mlir::populateCallOpTypeConversionPattern(patterns, typeConverter);
         mlir::ConversionTarget target(getContext());
-        configConversionTarget(target);
+        configConversionTarget(target, typeConverter);
         if (mlir::applyPartialConversion(module, target, mlir::FrozenRewritePatternSet(std::move(patterns))).failed()) {
             module.print(llvm::outs());
             signalPassFailure();
