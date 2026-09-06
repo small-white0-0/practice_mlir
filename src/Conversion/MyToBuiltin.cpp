@@ -84,18 +84,6 @@ namespace my {
                         llvm::errs() << "convert block argument failed.";
                         return mlir::failure();
                     }
-                    // 修改returnOp,放在此处一起修改，否则func会因为缺失terminate指令报错。
-                    if (auto region = &funOp->getRegion(0)) {
-                        if (auto op = &region->back().back(); mlir::isa<my::ReturnOp>(op)) {
-                            rewriter.setInsertionPointAfter(op);
-                            mlir::SmallVector<mlir::Value> returnOperands;
-                            for (int i = 0; i < op->getNumOperands(); i++) {
-                                returnOperands.push_back(rewriter.getRemappedValue(op->getOperand(i)));
-                            }
-                            auto newOp = mlir::func::ReturnOp::create(rewriter, op->getLoc(), returnOperands);
-                            rewriter.replaceOp(op, newOp);
-                        }
-                    }
                     // 恢复insertPointer
                     rewriter.restoreInsertionPoint(savedPoint);
                 } else if (!mlir::dyn_cast<mlir::func::FuncOp>(funOp)) {
@@ -113,6 +101,16 @@ namespace my {
             }
         };
 
+        struct ReturnOpConversionPattern : mlir::OpConversionPattern<my::ReturnOp> {
+            using Base::Base;
+
+            llvm::LogicalResult matchAndRewrite(my::ReturnOp op, OpAdaptor adaptor,
+                                                mlir::ConversionPatternRewriter &rewriter) const override {
+                const auto newOp = mlir::func::ReturnOp::create(rewriter, op.getLoc(), adaptor.getOperands());
+                rewriter.replaceOp(op, newOp);
+                return mlir::success();
+            }
+        };
 
         struct BufferCastOpConversionPattern : mlir::OpConversionPattern<my::BufferCast> {
             using Base::Base;
@@ -266,7 +264,9 @@ namespace my {
             SoftmaxOpConversionPattern,
             DeviceKernelOpConversionPattern,
             BufferCastOpConversionPattern,
-            ConstantOpConversionPattern>(
+            ConstantOpConversionPattern,
+            ReturnOpConversionPattern
+        >(
             typeConverter, patterns.getContext());
     }
 }
