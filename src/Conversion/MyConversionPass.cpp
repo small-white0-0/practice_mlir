@@ -23,6 +23,7 @@
 #include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/Bufferization/Transforms/Transforms.h"
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
+#include "mlir/Dialect/Bufferization/Pipelines/Passes.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 
 namespace my::conversion {
@@ -95,6 +96,10 @@ namespace my::conversion {
         bufferizationOptions.bufferizeFunctionBoundaries = true;
         // 对应 --one-shot-bufferize="bufferize-function-boundaries"
         pm.addPass(mlir::bufferization::createOneShotBufferizePass(bufferizationOptions));
+        // 添加 缓冲区的释放，上面的pass会适当增加memref.alloc但是并不会生成memref.dealloc
+        // 为了生成性能优化的memref.alloc需要使用下面的pipeline而不是直接使用pass
+        mlir::bufferization::BufferDeallocationPipelineOptions bufferDeallocationOptions;
+        mlir::bufferization::buildBufferDeallocationPipeline(pm, bufferDeallocationOptions);
         pm.addPass(mlir::createCanonicalizerPass());
         pm.addPass(mlir::createCSEPass());
 
