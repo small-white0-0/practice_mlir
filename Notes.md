@@ -129,3 +129,11 @@
     1. `TypeConverter`一般要注册`mlir::Type`到`mlir::Type`的 identity 转换作为第一个conversion. 原因是：其`isLegal`方法实现本质是`convertType(type) == type;`，并且在进行conversion遍历时是reverse倒序遍历的，所以要有一个 identity 变换作为fallback，否则该方法会失效。
     2. `ConversionTarget`的合法标记，除了开始可以跳过pattern，还是结束时的检查规则，如果pattern执行之后op不合法且无法继续合法化，则会被回退。所以对于签名一类的重写，必须使用动态标记，否则无法进入pattern或者执行后无法到达合法状态被回退。
     3. 类型转换除了要在自定义的dialect的op中做类型转换外，还有些要在其他dialect中的op中进行类型转换，例如主要的`func.func`,`func.return`,`call`。当然，因为这种事情过于常见，mlir提供了通用的pattern,可以通过`populate***TypeConversionPattern`添加pattern.
+17. 对于Pass的注意事项。
+    > 根据mlir的文档，`OperationPass` 为了线程安全需要做几个保证：1. 无全局可变状态。 2. 无跨 `runOnOperation`状态 3. 除祖先Op状态外不可读取其他Op 4. 不可修改当前Op范围以外的内容内容。 
+    > 
+    > 简而言之就是：Pass要无状态可重入，只可读取祖先Op状态,只能读写当前Op。
+    > 
+    > 普通 `OperationPass` 要严格遵守 Operation scope 规则；`Pattern` 中通过 `Rewriter` 修改 IR，也要注意修改范围。（后面这个算补充，不能绕过rewriter接口直接调用Op的erase之类的修改IR的操作）
+    > 
+    > 但是，对于 Dialect Conversion，要看 `applyFullConversion` 、`applyPartialConversion` 的 root operation，但一般 conversion pass 都是以 ModuleOp 作为入口，因此 pattern 一般可以忽略。

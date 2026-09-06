@@ -261,7 +261,12 @@ namespace my {
 
 namespace my {
     llvm::LogicalResult BufferCast::canonicalize(my::BufferCast op, mlir::PatternRewriter &rewriter) {
-        llvm::outs() << "enter BufferCast::canonicalize";
+        // 因为当前的Op没有实现Pure标记，但是实际该Op是无副作用的，
+        // 所以当Op成为deadcode时，主动删除一下。
+        if (op.use_empty()) {
+            rewriter.eraseOp(op);
+            return mlir::success();
+        }
         // 之针对 scatter 的情况，这样只有一个操作数，便于判断。如果之前是buffercast,且输入输出的参数和dpattr都一样就消除当前的op,
         // 如果之前的cast也是deadcode,那么顺道也删除了。
         if (op.getOperands().size() != 1) {
@@ -293,11 +298,17 @@ namespace my {
         // }
 
         // 执行消除
-        rewriter.replaceAllUsesWith(op_results, above_cast_op_operands);
-        rewriter.eraseOp(op);
-        if (above_cast_op.use_empty()) {
-            rewriter.eraseOp(above_cast_op);
-        }
+        rewriter.replaceOp(op, above_cast_op_operands);
+        // 不使用下面的方式，是因为规范化方法被调用的pass可以在任意Op上，
+        // 所以为了确保pass一定不会违反线程安全的约束，所以只使用replaceOp替换当前op，而不删除above_cast。
+        // Greedy canonicalizer 会在受影响的op上再执行一次canonicalization。
+        // 所以 above_cast 会再触发一次规范化方法，然后就会在规范化方法开头判断是否是 deadcode 进行移除。
+        //
+        // rewriter.replaceAllUsesWith(op_results, above_cast_op_operands);
+        // rewriter.eraseOp(op);
+        // if (above_cast_op.use_empty()) {
+        //     rewriter.eraseOp(above_cast_op);
+        // }
         return mlir::success();
     }
 }
