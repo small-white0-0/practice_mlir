@@ -125,3 +125,7 @@
     > legal是绝对不会检查pattern执行重写，default 和 illegal 都会检查 pattern 进行重写，
     > 但是对于失败之后的处理不一样。
 15. `mlir::TypeConverter::convertBlockSignature` 虽然是convert开头，但是它和其他convert不一样不是直接返回转换之后的block块，而是返回一个`mlir::TypeConverter::SignatureConversion`对象，只是提供块参数的类型转换，实际使用一般还需要配合`mlir::ConversionPatternRewrite::applySignatureConversion`才能等到转换后的block。虽然其实针对region的情况，直接使用`mlir::ConversionPatternRewrite::convertRegionTypes`，更简单。
+16. 对于类型转换的注意事项。
+    1. `TypeConverter`一般要注册`mlir::Type`到`mlir::Type`的 identity 转换作为第一个conversion. 原因是：其`isLegal`方法实现本质是`convertType(type) == type;`，并且在进行conversion遍历时是reverse倒序遍历的，所以要有一个 identity 变换作为fallback，否则该方法会失效。
+    2. `ConversionTarget`的合法标记，除了开始可以跳过pattern，还是结束时的检查规则，如果pattern执行之后op不合法且无法继续合法化，则会被回退。所以对于签名一类的重写，必须使用动态标记，否则无法进入pattern或者执行后无法到达合法状态被回退。
+    3. 类型转换除了要在自定义的dialect的op中做类型转换外，还有些要在其他dialect中的op中进行类型转换，例如主要的`func.func`,`func.return`,`call`。当然，因为这种事情过于常见，mlir提供了通用的pattern,可以通过`populate***TypeConversionPattern`添加pattern.
