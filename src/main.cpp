@@ -344,8 +344,10 @@ int test4() {
     LLVM_DEBUG(module->dump());
     llvm::LLVMContext llvmContext;
     auto llvmModule = mlir::translateModuleToLLVMIR(module.get(), llvmContext, "My");
-    LLVM_DEBUG(llvm::errs() << "to llvm ir.\n";
-        llvmModule->dump(););
+    if (!llvmModule) {
+        llvm::errs() << "translate to llvm module failed\n";
+        return 1;
+    }
     std::error_code ec;
     llvm::raw_fd_ostream irFile(OUTPUT_FILE, ec, llvm::sys::fs::OpenFlags::OF_Text);
     if (ec) {
@@ -354,7 +356,6 @@ int test4() {
     }
     llvmModule->print(irFile, nullptr);
     return 0;
-
 }
 
 int main(int argc, char **argv) {

@@ -29,5 +29,5 @@ echo "======= Test 3: 展示使用ConversionPass进行的方言下降 ======"
 ./build/src/practice_mlir 3
 echo "======= Test 4: 展示全流程的mlir到可执行文件 ======"
 ./build/src/practice_mlir 4 ${CODE_MLIR} ./build/output.ll
-clang++ ./build/output.ll -o ./build/a.out
+clang++ ./build/output.ll -L./build/src -lruntime -o ./build/a.out
 ./build/a.out

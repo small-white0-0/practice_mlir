@@ -5,6 +5,10 @@
 #include "llvm/Support/FormatVariadic.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Bufferization/TransformOps/BufferizationTransformOps.h"
 
 namespace my {
     namespace {
@@ -234,6 +238,273 @@ namespace my {
                 return mlir::success();
             }
         };
+
+        struct PrintOpConversionPattern
+                : public mlir::OpConversionPattern<my::PrintOp> {
+            using OpConversionPattern<my::PrintOp>::OpConversionPattern;
+
+            llvm::LogicalResult matchAndRewrite(
+                my::PrintOp op,
+                OpAdaptor adaptor,
+                mlir::ConversionPatternRewriter &rewriter) const override {
+                mlir::Value input = adaptor.getInput();
+                mlir::Type inputType = input.getType();
+
+                // --------------------------------------------------------
+                // 1. scalar -> memref<1xT>
+                //    memref 保持原类型则直接进入下一步
+                //    MyTensor(tensor) 构建 materialization
+                // --------------------------------------------------------
+                mlir::Value printValue = input;
+                mlir::MemRefType rankedMemRef;
+
+                if (auto myTensorType = mlir::dyn_cast<my::MyTensorType>(op.getInput().getType())) {
+                    auto memrefType = mlir::MemRefType::get(
+                        myTensorType.getShape(),
+                        myTensorType.getElementType());
+                    auto cast = mlir::bufferization::ToBufferOp::create(
+                        rewriter,
+                        op.getLoc(),
+                        memrefType,
+                        adaptor.getInput());
+
+                    rankedMemRef = memrefType;
+                    printValue = cast.getResult();
+                } else if (auto memrefType =
+                        mlir::dyn_cast<mlir::MemRefType>(inputType)) {
+                    rankedMemRef = memrefType;
+                } else {
+                    // 这里可以根据你的实际需求限制 scalar 类型
+                    if (!mlir::isa<mlir::IntegerType>(inputType) &&
+                        !mlir::isa<mlir::FloatType>(inputType)) {
+                        return rewriter.notifyMatchFailure(
+                            op, "unsupported print type");
+                    }
+
+                    rankedMemRef = mlir::MemRefType::get(
+                        {}, inputType);
+
+                    auto alloca = mlir::memref::AllocaOp::create(rewriter, op.getLoc(), rankedMemRef);
+
+                    mlir::memref::StoreOp::create(rewriter, op.getLoc(), input, alloca);
+
+                    printValue = alloca;
+                }
+
+                // --------------------------------------------------------
+                // 2. 根据 element type 选择 runtime
+                // --------------------------------------------------------
+                mlir::Type elementType =
+                        rankedMemRef.getElementType();
+
+                llvm::StringRef runtimeName;
+
+                if (mlir::isa<mlir::Float32Type>(elementType)) {
+                    runtimeName = "my_print_f32";
+                } else if (mlir::isa<mlir::Float64Type>(elementType)) {
+                    runtimeName = "my_print_f64";
+                } else if (mlir::isa<mlir::IntegerType>(elementType)) {
+                    auto intType =
+                            mlir::cast<mlir::IntegerType>(elementType);
+
+                    switch (intType.getWidth()) {
+                        case 32:
+                            runtimeName = "my_print_i32";
+                            break;
+                        case 64:
+                            runtimeName = "my_print_i64";
+                            break;
+                        default:
+                            return rewriter.notifyMatchFailure(
+                                op, "unsupported integer element type");
+                    }
+                } else {
+                    return rewriter.notifyMatchFailure(
+                        op, "unsupported element type");
+                }
+
+                // --------------------------------------------------------
+                // 3. ranked memref -> unranked memref
+                // --------------------------------------------------------
+                auto unrankedType =
+                        mlir::UnrankedMemRefType::get(
+                            elementType,
+                            rankedMemRef.getMemorySpace());
+
+                mlir::Value unrankedValue = mlir::memref::CastOp::create(
+                    rewriter, op.getLoc(), unrankedType, printValue);
+
+                // --------------------------------------------------------
+                // 4. runtime 函数类型
+                //
+                // func @my_print_f32(memref<*xf32>)
+                // --------------------------------------------------------
+                auto funcType =
+                        mlir::FunctionType::get(
+                            rewriter.getContext(),
+                            {unrankedType},
+                            {});
+
+                auto module =
+                        op->getParentOfType<mlir::ModuleOp>();
+
+                if (!module)
+                    return rewriter.notifyMatchFailure(
+                        op, "no enclosing module");
+
+                auto printFunc =
+                        module.lookupSymbol<mlir::func::FuncOp>(
+                            runtimeName);
+
+                // --------------------------------------------------------
+                // 5. 创建 runtime declaration
+                // --------------------------------------------------------
+                if (!printFunc) {
+                    mlir::OpBuilder::InsertionGuard guard(rewriter);
+
+                    rewriter.setInsertionPointToStart(
+                        module.getBody());
+
+                    printFunc =
+                            rewriter.create<mlir::func::FuncOp>(
+                                op.getLoc(),
+                                runtimeName,
+                                funcType);
+                    printFunc.setPrivate();
+                    printFunc->setAttr(
+                        mlir::LLVM::LLVMDialect::getEmitCWrapperAttrName(),
+                        mlir::UnitAttr::get(
+                            rewriter.getContext()));
+                } else if (printFunc.getFunctionType() != funcType) {
+                    return rewriter.notifyMatchFailure(
+                        op,
+                        "existing print runtime has incompatible type");
+                }
+
+                // --------------------------------------------------------
+                // 6. my.print -> func.call
+                // --------------------------------------------------------
+                rewriter.replaceOpWithNewOp<mlir::func::CallOp>(
+                    op,
+                    runtimeName,
+                    mlir::TypeRange{},
+                    mlir::ValueRange{unrankedValue});
+                return mlir::success();
+            }
+        };
+
+        template<typename SrcOp, typename LinalgOp>
+        struct BinaryElementwiseConversionPattern
+                : public mlir::OpConversionPattern<SrcOp> {
+            using mlir::OpConversionPattern<SrcOp>::OpConversionPattern;
+
+            mlir::LogicalResult matchAndRewrite(
+                SrcOp op,
+                typename SrcOp::Adaptor adaptor,
+                mlir::ConversionPatternRewriter &rewriter) const override {
+                auto lhs = adaptor.getLhs();
+                auto rhs = adaptor.getRhs();
+
+                auto lhsType =
+                        mlir::dyn_cast<mlir::RankedTensorType>(lhs.getType());
+                auto rhsType =
+                        mlir::dyn_cast<mlir::RankedTensorType>(rhs.getType());
+
+                if (!lhsType || !rhsType)
+                    return rewriter.notifyMatchFailure(
+                        op, "operands must be ranked tensors");
+
+                // 当前先要求 shape 完全一致。
+                if (lhsType.getShape() != rhsType.getShape())
+                    return rewriter.notifyMatchFailure(
+                        op, "broadcasting not implemented yet");
+
+                auto resultType =
+                        mlir::dyn_cast<mlir::RankedTensorType>(
+                            this->getTypeConverter()->convertType(
+                                op.getResult().getType()));
+
+                if (!resultType)
+                    return rewriter.notifyMatchFailure(
+                        op, "result must be ranked tensor");
+
+                auto loc = op.getLoc();
+
+                // 创建 destination。
+                auto empty =
+                        rewriter.create<mlir::tensor::EmptyOp>(
+                            loc,
+                            resultType.getShape(),
+                            resultType.getElementType());
+
+                // ------------------------------------------------------------
+                // 创建具体的 linalg named op
+                // ------------------------------------------------------------
+
+                auto linalgOp =
+                        LinalgOp::create(
+                            rewriter,
+                            loc,
+                            /*resultTensorTypes=*/mlir::TypeRange{resultType},
+                            /*inputs=*/mlir::ValueRange{lhs, rhs},
+                            /*outputs=*/mlir::ValueRange{empty});
+
+                // ------------------------------------------------------------
+                // 替换原 My Op
+                // ------------------------------------------------------------
+
+                rewriter.replaceOp(
+                    op,
+                    linalgOp.getResultTensors());
+
+                return mlir::success();
+            }
+        };
+
+        struct ExpOpConversionPattern
+                : public mlir::OpConversionPattern<my::ExpOp> {
+            using OpConversionPattern<my::ExpOp>::OpConversionPattern;
+
+            mlir::LogicalResult matchAndRewrite(
+                my::ExpOp op,
+                OpAdaptor adaptor,
+                mlir::ConversionPatternRewriter &rewriter) const override {
+                auto input = adaptor.getInput();
+
+                auto inputType =
+                        mlir::dyn_cast<mlir::RankedTensorType>(input.getType());
+                if (!inputType)
+                    return rewriter.notifyMatchFailure(
+                        op, "expected ranked tensor");
+
+                auto resultType =
+                        mlir::dyn_cast<mlir::RankedTensorType>(
+                            getTypeConverter()->convertType(op.getResult().getType()));
+                if (!resultType)
+                    return rewriter.notifyMatchFailure(
+                        op, "expected ranked tensor result");
+
+                auto loc = op.getLoc();
+
+                // 创建 destination tensor。
+                auto empty = rewriter.create<mlir::tensor::EmptyOp>(
+                    loc,
+                    resultType.getShape(),
+                    resultType.getElementType());
+
+                // linalg.exp(input, output)
+                auto exp = rewriter.create<mlir::linalg::ExpOp>(
+                    loc,
+                    mlir::ValueRange{input},
+                    mlir::ValueRange{empty});
+
+                rewriter.replaceOp(
+                    op,
+                    exp.getResultTensors());
+
+                return mlir::success();
+            }
+        };
     }
 
     void initMyToBuiltinTypeConvert(mlir::TypeConverter &typeConverter) {
@@ -266,7 +537,13 @@ namespace my {
             DeviceKernelOpConversionPattern,
             BufferCastOpConversionPattern,
             ConstantOpConversionPattern,
-            ReturnOpConversionPattern
+            ReturnOpConversionPattern,
+            PrintOpConversionPattern,
+            BinaryElementwiseConversionPattern<my::AddOp, mlir::linalg::AddOp>,
+            BinaryElementwiseConversionPattern<my::SubOp, mlir::linalg::SubOp>,
+            BinaryElementwiseConversionPattern<my::MulOp, mlir::linalg::MulOp>,
+            BinaryElementwiseConversionPattern<my::DivOp, mlir::linalg::DivOp>,
+            ExpOpConversionPattern
         >(
             typeConverter, patterns.getContext());
     }

@@ -18,4 +18,4 @@ add_executable(practice_mlir)
 target_sources(practice_mlir PRIVATE main.cpp)
 target_link_libraries(practice_mlir PRIVATE ${MY_LIBS} MLIRRegisterAllDialects MLIRToLLVMIRTranslationRegistration)
 add_subdirectory(tools)
-
+add_library(runtime runtime.cpp)
