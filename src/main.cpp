@@ -90,28 +90,13 @@ int test1() {
         const_v1->dump();
         llvm::errs() << "Const tensor in divece 1 :\n";
         const_v3->dump();
-        // Buffer Op
-        auto buffer_op = my::BufferOp::create(builder, loc, mlir::ValueRange{const_v1, const_v3});
-        llvm::errs() << "Buffer Op :\n";
-        buffer_op->dump();
-        // GetTensor Op
-        auto get_tensor_op_1 = my::GetTensorOp::create(builder, loc, value_tensorType, buffer_op, 0);
-        auto get_tensor_op_2 = my::GetTensorOp::create(builder, loc, value_tensorType1, buffer_op, 1);
-        llvm::errs() << "Get Tensor Op :\n";
-        get_tensor_op_1->dump();
-        get_tensor_op_2->dump();
         // Softmax op
-        auto softmax_op = my::SoftmaxOp::create(builder, loc, get_tensor_op_1, 1);
+        auto softmax_op = my::SoftmaxOp::create(builder, loc, const_v1, 1);
         llvm::outs() << "Softmax Op :\n";
         softmax_op->dump();
-        auto exp_op = my::ExpOp::create(builder, loc, get_tensor_op_2);
+        auto exp_op = my::ExpOp::create(builder, loc, const_v2);
         llvm::errs() << "Exp Op :\n";
         exp_op->dump();
-        // all to all op
-        auto out_buffer_op = my::BufferOp::create(builder, loc, mlir::ValueRange{const_v2, const_v4});
-        auto all_to_all_op = my::AllToAllOp::create(builder, loc, buffer_op, out_buffer_op);
-        llvm::errs() << "All to All Op :\n";
-        all_to_all_op->dump();
         moduleOp.dump();
     }
     // 测试属性

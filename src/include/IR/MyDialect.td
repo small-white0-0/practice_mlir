@@ -53,22 +53,6 @@ def My_TensorType : My_Type<"MyTensor", "my_tensor", [ShapedTypeInterface],"::ml
 }
 def AnyMyTensor : Type<CPred<"::llvm::isa<::my::MyTensorType>($_self)">>;
 
-def My_BufferType : My_Type<"Buffer","buffer",[]>{
-  let parameters = (ins
-    ArrayRefParameter<"int64_t">:$devices
-  );
-
-  let genStorageClass = 1;
-
-  let hasStorageCustomConstructor = 0;
-
-  let assemblyFormat = "`<`$devices`>`";
-
-  let skipDefaultBuilders = 0;
-
-}
-def AnyBuffer : Type<CPred<"::llvm::isa<::my::BufferType>($_self)">>;
-def AnyBufferOrMyTensor : AnyTypeOf<[AnyBuffer,AnyMyTensor]>;
 // ===============================================
 // Interface
 class My_AttrInterface<string name,list<Interface> baseInterfaces = []>
@@ -188,48 +172,6 @@ def My_SubOp : My_BinaryOp<"sub",AnyMyTensor>;
 def My_MulOp : My_BinaryOp<"mul",AnyMyTensor>;
 def My_DivOp : My_BinaryOp<"div",AnyMyTensor>;
 
-
-def My_AllToAllOp : My_Op<"all_to_all",[]>{
-    let arguments = (ins
-        AnyBuffer:$input,
-        AnyBuffer:$output
-    );
-}
-
-
-def My_BufferOp : My_Op<"buffer",[]>{
-    let description = "将 多个device_id 的tensor 组合成 一个 buffer";
-    let arguments = (ins
-        Variadic<AnyMyTensor>:$tensors
-    );
-    let results = (outs
-        AnyBuffer:$result);
-    let hasVerifier = 1;
-    let builders = [
-        OpBuilder<(ins "::mlir::ValueRange":$tensors) ,
-            [{
-                $_state.addOperands(tensors);
-                ::llvm::SmallVector<int64_t> devices;
-                for (auto tensor : tensors) {
-                    auto tensor_type =
-                        llvm::cast<::my::MyTensorType>(tensor.getType());
-                    devices.push_back(tensor_type.getDeviceId());
-                }
-                $_state.addTypes(::my::BufferType::get($_state.getContext(), devices));
-            }]>
-    ];
-}
-
-def My_GetTensorOp: My_Op<"get_tensor",[]>{
-    let description = "从buffer中取出指定device_id的tensor";
-    let arguments = (ins
-        AnyBuffer:$buffer,
-        I64Attr:$device_id
-    );
-    let results = (outs
-        AnyMyTensor:$result);
-    let hasVerifier = 1;
-}
 
 def My_PrintOp: My_Op<"print",[]>{
     let arguments = (ins
